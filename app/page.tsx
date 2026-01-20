@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { Download, Package, Plus, Trash2, Box, Plane, FileBadge, DollarSign, ChevronDown, FileText } from 'lucide-react';
+import { Download, Package, Plus, Trash2, Box, Plane, FileBadge, DollarSign, ChevronDown, FileText, Layers } from 'lucide-react';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 import {
   DropdownMenu,
@@ -15,8 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { generateMasterExcel, MasterData } from '@/utils/excelGenerator';
-import { generateCommercialInvoice } from '@/utils/generators/commercialInvoice';
+// Imported Helper Functions for Excel
+import { generateMasterExcel, MasterData, addMasterSheet } from '@/utils/excelGenerator';
+import { generateCommercialInvoice, addCommercialInvoiceSheet } from '@/utils/generators/commercialInvoice';
 
 // --- HELPER COMPONENT PROPS INTERFACE ---
 interface ExcelRowProps {
@@ -49,7 +52,7 @@ const StackedField: React.FC<ExcelRowProps> = ({ label, register, name, placehol
 export default function MasterInvoiceApp() {
   const { register, control, handleSubmit, watch } = useForm<MasterData>({
     defaultValues: {
-      // --- PARTIES ---
+      // --- PARTIES (Env vars for security) ---
       exporterName: process.env.NEXT_PUBLIC_EXPORTER_NAME || "",
       exporterAddress: process.env.NEXT_PUBLIC_EXPORTER_ADDRESS || "",
       exporterPhone: "",
@@ -67,7 +70,7 @@ export default function MasterInvoiceApp() {
       companyGstNo: "",
       drugLicNo: "",
       lutRef: "",
-      lutDate: "", // Added
+      lutDate: "", 
       
       // --- REMITTANCE ---
       remittanceRef: "",
@@ -80,8 +83,8 @@ export default function MasterInvoiceApp() {
       proformaValue: "",
       invoiceValue110: "",
       invoiceValue110Round: "",
-      adcRate: "", // USD Rate for ADC Round
-      exchangeRate: 0, // USD Exchange Rate
+      adcRate: "", 
+      exchangeRate: 0,
       inrValue: "",
       freightValue: 0,
       insuranceValue: 0,
@@ -146,14 +149,39 @@ export default function MasterInvoiceApp() {
   const watchedItems = watch("items");
   const totalValue = watchedItems?.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.price) || 0)), 0) || 0;
 
+  // --- 1. DOWNLOAD MASTER SHEET ONLY ---
   const onDownloadMaster: SubmitHandler<MasterData> = async (data) => {
     try { await generateMasterExcel(data); } 
     catch (error) { console.error(error); alert("Failed."); }
   };
 
+  // --- 2. DOWNLOAD COMMERCIAL INVOICE ONLY ---
   const onDownloadCommercial: SubmitHandler<MasterData> = async (data) => {
     try { await generateCommercialInvoice(data); } 
     catch (error) { console.error(error); alert("Failed."); }
+  };
+
+  // --- 3. DOWNLOAD COMPLETE SET (ALL TABS) ---
+  const onDownloadCombined: SubmitHandler<MasterData> = async (data) => {
+    try {
+      // Create Empty Workbook
+      const workbook = new ExcelJS.Workbook();
+      
+      // Add Sheet 1: Master Data
+      addMasterSheet(workbook, data);
+      
+      // Add Sheet 2: Commercial Invoice
+      addCommercialInvoiceSheet(workbook, data);
+      
+      // Save File
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Complete_Set_${data.invoiceNo || 'DRAFT'}.xlsx`);
+      
+    } catch (error) {
+      console.error(error);
+      alert("Failed to generate Combined Excel.");
+    }
   };
 
   return (
@@ -176,19 +204,30 @@ export default function MasterInvoiceApp() {
               <div className="text-xl font-mono font-bold text-blue-600">${totalValue.toFixed(2)}</div>
            </div>
            
+           {/* DOWNLOAD MENU */}
            <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="bg-blue-700 hover:bg-blue-800 text-white shadow-lg">
                 <Download className="w-4 h-4 mr-2" /> Download <ChevronDown className="w-4 h-4 ml-2"/>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-64">
+              
+              {/* COMBINED BUTTON */}
+              <DropdownMenuItem onClick={handleSubmit(onDownloadCombined)} className="cursor-pointer bg-blue-50 text-blue-700 font-bold focus:bg-blue-100">
+                <Layers className="w-4 h-4 mr-2" /> Download Complete Set
+              </DropdownMenuItem>
+              
+              <Separator className="my-1"/>
+              
+              {/* INDIVIDUAL BUTTONS */}
               <DropdownMenuItem onClick={handleSubmit(onDownloadMaster)} className="cursor-pointer">
-                <FileText className="w-4 h-4 mr-2" /> Master Data Sheet
+                <FileText className="w-4 h-4 mr-2" /> Master Data Sheet Only
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleSubmit(onDownloadCommercial)} className="cursor-pointer">
-                <FileBadge className="w-4 h-4 mr-2" /> Commercial Invoice
+                <FileBadge className="w-4 h-4 mr-2" /> Commercial Invoice Only
               </DropdownMenuItem>
+              
               <DropdownMenuItem disabled>
                 <span className="opacity-50">Packing List (Coming Soon)</span>
               </DropdownMenuItem>
@@ -223,7 +262,6 @@ export default function MasterInvoiceApp() {
                     <ExcelRow label="IEC No" register={register} name="iecNo" />
                     <ExcelRow label="Co. GSTN" register={register} name="companyGstNo" />
                     <ExcelRow label="Drug Lic" register={register} name="drugLicNo" />
-                    {/* UPDATED: Added LUT Date */}
                     <div className="grid grid-cols-2 gap-2">
                       <StackedField label="LUT Ref" register={register} name="lutRef" />
                       <StackedField label="LUT Date" register={register} name="lutDate" placeholder="dd-mm-yyyy" />
@@ -248,7 +286,6 @@ export default function MasterInvoiceApp() {
                      <ExcelRow label="110% Value" register={register} name="invoiceValue110" />
                      <ExcelRow label="110% Round" register={register} name="invoiceValue110Round" />
                      <ExcelRow label="ADC Rate" register={register} name="adcRate" />
-                     {/* UPDATED: Added Exchange Rate */}
                      <ExcelRow label="Exch Rate" register={register} name="exchangeRate" type="number" />
                      <ExcelRow label="INR Value" register={register} name="inrValue" />
                   </div>

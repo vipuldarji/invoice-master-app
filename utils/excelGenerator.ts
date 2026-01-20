@@ -1,8 +1,7 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
-// --- 1. INTERFACES (Matches app/page.tsx 100%) ---
-
+// --- 1. INTERFACES ---
 export interface BoxDimension {
   boxNo: string;
   dimensions: string;
@@ -31,7 +30,6 @@ export interface LineItem {
 }
 
 export interface MasterData {
-  // Parties
   exporterName: string;
   exporterAddress: string;
   exporterPhone: string;
@@ -42,35 +40,27 @@ export interface MasterData {
   buyerName: string;
   buyerOrderRef: string;
   chaName: string;
-
-  // Regulatory
   iecNo: string;
   gstStatus: string;
   companyGstNo: string;
   drugLicNo: string;
   lutRef: string;
-  lutDate: string;
-  
-  // Remittance
+  lutDate: string; // Ensure this is here
   remittanceRef: string;
   remittanceDate: string;
   remittanceAmount: string;
   remittanceAvailable: string;
   remittanceUsed: string;
-
-  // Financials
   proformaValue: string;
   invoiceValue110: string;
   invoiceValue110Round: string; 
   adcRate: string;
+  exchangeRate: number;
   inrValue: string;
   freightValue: number;
   insuranceValue: number;
-  exchangeRate: number;
   currency: string;
   uom: string;
-
-  // Logistics
   invoiceNo: string;
   invoiceDate: string;
   packingListNo: string;
@@ -83,33 +73,24 @@ export interface MasterData {
   flightDate: string;
   paymentTerms: string;
   termsOfDelivery: string;
-  
-  // Shipping Docs
   shippingBillNo: string;
   shippingBillDate: string;
   awbNo: string;
   awbDate: string;
   policyNo: string;
   policyDate: string;
-
-  // Packing Summary
   totalGrossWeight: string;
   totalNetWeight: string;
   totalCorrugatedBoxes: string;
   generalDescription: string;
   globalIgst: string;
-
-  // Manufacturer
   manufacturerName: string;
   manufacturerAddress: string;
-
-  // Arrays
   boxDimensions: BoxDimension[];
   items: LineItem[];
 }
 
 // --- 2. STYLING CONSTANTS ---
-
 const BORDER_ALL: Partial<ExcelJS.Borders> = {
   top: { style: 'thin' },
   left: { style: 'thin' },
@@ -128,15 +109,15 @@ const FONTS = {
   BOLD: { bold: true, size: 10, name: 'Calibri' }
 };
 
-// --- 3. GENERATOR LOGIC ---
+// --- 3. SHEET GENERATION LOGIC ---
 
-export const generateMasterExcel = async (data: MasterData) => {
-  const workbook = new ExcelJS.Workbook();
+// Helper to add Master Sheet to an existing Workbook
+export const addMasterSheet = (workbook: ExcelJS.Workbook, data: MasterData) => {
   const sheet = workbook.addWorksheet('Master Sheet', {
-    views: [{ showGridLines: false }]
+    views: [{ showGridLines: false }],
+    properties: { tabColor: { argb: 'FF00FF00' } } // Green Tab
   });
 
-  // Setup ample columns to fit all data
   sheet.columns = [
     { key: 'A', width: 25 }, { key: 'B', width: 25 }, { key: 'C', width: 10 }, 
     { key: 'D', width: 20 }, { key: 'E', width: 15 }, { key: 'F', width: 15 }, { key: 'G', width: 15 },
@@ -174,7 +155,6 @@ export const generateMasterExcel = async (data: MasterData) => {
 
   row += 4;
 
-  // HELPER FUNCTIONS
   const drawRow = (r: number, label: string, val: string, color: ExcelJS.Fill) => {
     sheet.getCell(`A${r}`).value = label;
     sheet.getCell(`A${r}`).fill = color;
@@ -197,7 +177,7 @@ export const generateMasterExcel = async (data: MasterData) => {
 
   const startLogisticsRow = row;
 
-  // --- LOGISTICS (Left Side) ---
+  // Logistics
   drawRow(row, "Invoice No", data.invoiceNo, FILLS.BLUE); row++;
   drawRow(row, "Date", data.invoiceDate, FILLS.BLUE); row++;
   drawRow(row, "Packing List No", data.packingListNo, FILLS.ORANGE); row++;
@@ -206,14 +186,14 @@ export const generateMasterExcel = async (data: MasterData) => {
   drawRow(row, "Final Destination", data.finalDestination, FILLS.ORANGE); row++;
   drawRow(row, "Payment Terms", data.paymentTerms, FILLS.ORANGE); row++;
   
-  // --- FINANCIALS (Yellow Block) ---
+  // Financials
   drawRow(row, "Proforma Value", data.proformaValue, FILLS.YELLOW); row++;
   drawRow(row, "110% Value", data.invoiceValue110, FILLS.YELLOW); row++;
-  drawRow(row, "110% Round Up", data.invoiceValue110Round, FILLS.YELLOW); row++; 
+  drawRow(row, "110% Round Up", data.invoiceValue110Round, FILLS.YELLOW); row++;
   drawRow(row, "ADC Rate", data.adcRate, FILLS.YELLOW); row++;
   drawRow(row, "INR Value", data.inrValue, FILLS.YELLOW); 
 
-  // --- REGULATORY (Right Side) ---
+  // Regulatory
   let regRow = startLogisticsRow;
   drawRegRow(regRow, "IEC No.", data.iecNo); regRow++;
   drawRegRow(regRow, "GST Status", data.gstStatus); regRow++;
@@ -230,7 +210,7 @@ export const generateMasterExcel = async (data: MasterData) => {
 
   row = Math.max(row, regRow) + 2;
 
-  // --- BOX DIMENSIONS ---
+  // Box Dimensions
   sheet.getCell(`A${row}`).value = "PACKING DIMENSIONS";
   sheet.getCell(`A${row}`).fill = FILLS.ORANGE;
   sheet.getCell(`A${row}`).font = FONTS.HEADER;
@@ -249,7 +229,7 @@ export const generateMasterExcel = async (data: MasterData) => {
   });
   row++;
 
-  // --- ITEMS HEADER (100% MATCH) ---
+  // Items
   const headers = [
     'Sr.', 'Product Name', 'HSN', 'Pack', 'Qty', 'Price', 'Batch', 'Mfg Date', 'Exp Date', 
     'Box Info', 'State', 'Supp GST', 'Dist', 'Gr Wt', 'Net Wt', 'UOM', 'GST %', 'End Use'
@@ -265,29 +245,13 @@ export const generateMasterExcel = async (data: MasterData) => {
   });
   row++;
 
-  // --- ITEMS DATA LOOP ---
   data.items.forEach((item, index) => {
     const vals = [
-      index + 1,
-      item.productName,
-      item.hsnSac,
-      item.packSize,
-      item.quantity,
-      item.price,
-      item.batchNo,
-      item.mfgDate, 
-      item.expDate,
-      item.boxInfo,
-      item.stateCode, 
-      item.supplierGstin, 
-      item.distCode, 
-      item.grossWeight,
-      item.netWeight, 
-      item.uom, 
-      item.gstPercent, 
-      item.endUse 
+      index + 1, item.productName, item.hsnSac, item.packSize, item.quantity, item.price,
+      item.batchNo, item.mfgDate, item.expDate, item.boxInfo, item.stateCode,
+      item.supplierGstin, item.distCode, item.grossWeight, item.netWeight,
+      item.uom, item.gstPercent, item.endUse
     ];
-
     vals.forEach((v, i) => {
        const cell = sheet.getCell(row, i + 1);
        cell.value = v;
@@ -297,14 +261,19 @@ export const generateMasterExcel = async (data: MasterData) => {
     row++;
   });
   
-  // --- FOOTER ---
+  // Footer
   row++;
   sheet.mergeCells(`A${row}:E${row}`);
   sheet.getCell(`A${row}`).value = `Description: ${data.generalDescription} | IGST: ${data.globalIgst}`;
   sheet.getCell(`A${row}`).fill = FILLS.BLUE;
   sheet.getCell(`A${row}`).border = BORDER_ALL;
+};
 
-  // --- SAVE ---
+// --- 4. EXPORT HANDLER ---
+// This Function generates just the single Master Excel file (Legacy support)
+export const generateMasterExcel = async (data: MasterData) => {
+  const workbook = new ExcelJS.Workbook();
+  addMasterSheet(workbook, data);
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   saveAs(blob, `Master_Invoice_${data.invoiceNo}.xlsx`);

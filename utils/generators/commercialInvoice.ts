@@ -12,18 +12,17 @@ const BORDER_ALL: Partial<ExcelJS.Borders> = {
 
 const FONT_HEADER = { bold: true, size: 10, name: 'Arial' };
 const FONT_TITLE = { bold: true, size: 14, underline: true, name: 'Arial' };
-const FONT_NORMAL = { size: 9, name: 'Arial' };
 const FONT_BOLD = { bold: true, size: 9, name: 'Arial' };
 
-export const generateCommercialInvoice = async (data: MasterData) => {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Commercial Invoice', {
+// --- 1. SHEET GENERATION LOGIC (Reusable) ---
+export const addCommercialInvoiceSheet = (workbook: ExcelJS.Workbook, data: MasterData) => {
+  const sheet = workbook.addWorksheet('INVOICE', { 
     views: [{ showGridLines: false }]
   });
 
   // 1. Column Setup
   sheet.columns = [
-    { key: 'A', width: 6 },  // Sr No
+    { key: 'A', width: 6 },  // Marks & Nos
     { key: 'B', width: 45 }, // Description
     { key: 'C', width: 12 }, // HSN
     { key: 'D', width: 8 },  // Pack
@@ -31,8 +30,8 @@ export const generateCommercialInvoice = async (data: MasterData) => {
     { key: 'F', width: 12 }, // Expiry
     { key: 'G', width: 10 }, // UQC
     { key: 'H', width: 10 }, // Qty
-    { key: 'I', width: 12 }, // Rate
-    { key: 'J', width: 12 }, // Amount
+    { key: 'I', width: 15 }, // Rate
+    { key: 'J', width: 15 }, // Amount
   ];
 
   let row = 1;
@@ -173,7 +172,7 @@ export const generateCommercialInvoice = async (data: MasterData) => {
   // --- ITEM HEADERS ---
   const headers = [
     "Marks & Nos", "Description of Goods", "HSN CODE", "Pack", "Batch No.", 
-    "Expiry Date", "Standard UQC", "Quantity (NOS)", "Rate / USD", "Amount / USD"
+    "Expiry Date", "Standard UQC", "Quantity (NOS)", "Rate Per Unit / USD", "Amount / USD"
   ];
   headers.forEach((h, i) => {
     const cell = sheet.getCell(row, i + 1);
@@ -255,11 +254,10 @@ export const generateCommercialInvoice = async (data: MasterData) => {
   sheet.getCell(`J${row}`).numFmt = '"$"#,##0.00';
   sheet.getCell(`J${row}`).border = BORDER_ALL;
 
-  // --- FIX 1: LEFT SIDE FOOTER (Box Info) ---
+  // Box Info
   sheet.mergeCells(`A${row}:E${row}`);
   sheet.getCell(`A${row}`).value = `No. of Corrugated Boxes :  ${data.totalCorrugatedBoxes}`;
   sheet.getCell(`A${row}`).font = FONT_BOLD;
-  // CORRECTED: Use Object syntax for partial border
   sheet.getCell(`A${row}`).border = { left: { style: 'thin' } }; 
   
   row++;
@@ -273,11 +271,10 @@ export const generateCommercialInvoice = async (data: MasterData) => {
   sheet.getCell(`J${row}`).numFmt = '"$"#,##0.00';
   sheet.getCell(`J${row}`).border = BORDER_ALL;
 
-  // --- FIX 2: GROSS WEIGHT ---
+  // Gross Weight
   sheet.mergeCells(`A${row}:E${row}`);
   sheet.getCell(`A${row}`).value = `Gross Weight :  ${data.totalGrossWeight} ${data.uom}`;
   sheet.getCell(`A${row}`).font = FONT_BOLD;
-  // CORRECTED: Use Object syntax
   sheet.getCell(`A${row}`).border = { left: { style: 'thin' } };
 
   row++;
@@ -293,25 +290,30 @@ export const generateCommercialInvoice = async (data: MasterData) => {
   sheet.getCell(`J${row}`).font = FONT_BOLD;
   sheet.getCell(`J${row}`).border = BORDER_ALL;
 
-  // --- FIX 3: NET WEIGHT ---
+  // Net Weight
   sheet.mergeCells(`A${row}:E${row}`);
   sheet.getCell(`A${row}`).value = `Nett Weight :  ${data.totalNetWeight} ${data.uom}`;
   sheet.getCell(`A${row}`).font = FONT_BOLD;
-  // CORRECTED: Use Object syntax
   sheet.getCell(`A${row}`).border = { left: { style: 'thin' }, bottom: { style: 'thin' } };
 
   row++;
 
   // Words & Declaration
   sheet.mergeCells(`A${row}:J${row+1}`);
-  sheet.getCell(`A${row}`).value = "AMOUNT CHARGEABLE (IN WORDS):\n" + "US DOLLARS ...ONLY";
+  sheet.getCell(`A${row}`).value = "AMOUNT CHARGEABLE (IN WORDS):\n" + "US DOLLARS ...ONLY"; 
   sheet.getCell(`A${row}`).alignment = { vertical: 'top', wrapText: true };
   sheet.getCell(`A${row}`).font = FONT_BOLD;
   sheet.getCell(`A${row}`).border = BORDER_ALL;
   row += 2;
 
+  // Dynamic Declaration
+  const isPaid = (data.gstStatus || "").toUpperCase().includes("PAID");
+  const declText = isPaid 
+    ? "* SUPPLY MEANT FOR EXPORT UNDER WITH PAYMENT OF INTEGRATED TAX (IGST)"
+    : "* SUPPLY MEANT FOR EXPORT UNDER LETTER OF UNDERTAKING WITHOUT PAYMENT OF IGST *";
+
   sheet.mergeCells(`A${row}:F${row+3}`);
-  sheet.getCell(`A${row}`).value = `DECLARATION:\nWe declare that this invoice shows actual price of the goods described and that all particulars are true and correct.\n* SUPPLY MEANT FOR EXPORT UNDER LETTER OF UNDERTAKING WITHOUT PAYMENT OF IGST *`;
+  sheet.getCell(`A${row}`).value = `DECLARATION:\nWe declare that this invoice shows actual price of the goods described and that all particulars are true and correct.\n${declText}`;
   sheet.getCell(`A${row}`).alignment = { wrapText: true, vertical: 'top' };
   sheet.getCell(`A${row}`).font = { size: 8, name: 'Arial' };
   sheet.getCell(`A${row}`).border = BORDER_ALL;
@@ -321,7 +323,12 @@ export const generateCommercialInvoice = async (data: MasterData) => {
   sheet.getCell(`G${row}`).alignment = { horizontal: 'center', vertical: 'bottom', wrapText: true };
   sheet.getCell(`G${row}`).font = FONT_BOLD;
   sheet.getCell(`G${row}`).border = BORDER_ALL;
+};
 
+// --- 2. EXPORT HANDLER (Legacy Support) ---
+export const generateCommercialInvoice = async (data: MasterData) => {
+  const workbook = new ExcelJS.Workbook();
+  addCommercialInvoiceSheet(workbook, data);
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   saveAs(blob, `Invoice_Commercial_${data.invoiceNo}.xlsx`);
