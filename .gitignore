@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+*.xlsx
+*.xls
+
+# Test data with real company information
+utils/testData.ts
