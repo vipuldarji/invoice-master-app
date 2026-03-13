@@ -12,6 +12,7 @@ export interface LineItem {
 }
 
 export interface MasterData {
+  dbkRodtepNote?: string;
   exporterName: string;
   exporterAddressLine1: string;
   exporterAddressLine2: string;

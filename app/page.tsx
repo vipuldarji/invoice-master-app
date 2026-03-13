@@ -7,16 +7,21 @@ import { Input } from '@/components/ui/input';
 import {
   Download, Package, Plus, Trash2, ChevronDown, ChevronRight,
   Plane, FileText, Layers, FileBadge, Box, DollarSign,
-  Building2, Ship, ClipboardList, Weight, CheckCircle2
+  Building2, Ship, ClipboardList, Weight, CheckCircle2,
+  Loader2, FileDown, FileSpreadsheet,
 } from 'lucide-react';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
-import { generateMasterExcel, MasterData, addMasterSheet } from '@/utils/excelGenerator';
-import { generateCommercialInvoice, addCommercialInvoiceSheet } from '@/utils/generators/commercialInvoice';
-import { TEST_DATA } from '@/utils/testData';
+import { MasterData } from '@/utils/excelGenerator';
+import {
+  downloadCompleteSet,
+  downloadCommercialInvoice,
+  downloadPackingList,
+  downloadMasterSheet,
+  type DownloadFormat,
+} from '@/utils/downloadUtils';
 
 // ─── FIELD COMPONENT ──────────────────────────────────────────────────────────
 
@@ -104,6 +109,7 @@ const steps = [
 export default function MasterInvoiceApp() {
   const [activeStep, setActiveStep] = useState(0);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null); // key of in-progress download
 
   const { register, control, handleSubmit, watch } = useForm<MasterData>({
     defaultValues: {
@@ -163,22 +169,44 @@ export default function MasterInvoiceApp() {
     sum + ((Number(item.quantity) || 0) * (Number(item.price) || 0)), 0) || 0;
 
   // ─── DOWNLOAD HANDLERS ────────────────────────────────────────────────────
+  // Each handler: validate form → build xlsx → optionally convert to PDF via /api/pdf
+  // 'format' controls whether we emit xlsx, pdf, or both.
 
-  const onDownloadMaster: SubmitHandler<MasterData> = async (data) => {
-    try { await generateMasterExcel(data); } catch (e) { console.error(e); alert("Failed."); }
-  };
-  const onDownloadCommercial: SubmitHandler<MasterData> = async (data) => {
-    try { await generateCommercialInvoice(data); } catch (e) { console.error(e); alert("Failed."); }
-  };
-  const onDownloadCombined: SubmitHandler<MasterData> = async (data) => {
+  const withDownload = (key: string, fn: () => Promise<void>) => async () => {
+    setDownloading(key);
     try {
-      const wb = new ExcelJS.Workbook();
-      addMasterSheet(wb, data);
-      addCommercialInvoiceSheet(wb, data);
-      const buf = await wb.xlsx.writeBuffer();
-      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Complete_Set_${data.invoiceNo || 'DRAFT'}.xlsx`);
-    } catch (e) { console.error(e); alert("Failed."); }
+      await fn();
+    } catch (e) {
+      console.error('[download]', e);
+      alert(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDownloading(null);
+    }
   };
+
+  const onDownloadMaster: SubmitHandler<MasterData> = (data) =>
+    withDownload('master', () => downloadMasterSheet(data, 'xlsx'))();
+
+  const onDownloadCommercial: SubmitHandler<MasterData> = (data) =>
+    withDownload('invoice-xlsx', () => downloadCommercialInvoice(data, 'xlsx'))();
+
+  const onDownloadCommercialPdf: SubmitHandler<MasterData> = (data) =>
+    withDownload('invoice-pdf', () => downloadCommercialInvoice(data, 'pdf'))();
+
+  const onDownloadPacking: SubmitHandler<MasterData> = (data) =>
+    withDownload('packing-xlsx', () => downloadPackingList(data, 'xlsx'))();
+
+  const onDownloadPackingPdf: SubmitHandler<MasterData> = (data) =>
+    withDownload('packing-pdf', () => downloadPackingList(data, 'pdf'))();
+
+  const onDownloadCombined: SubmitHandler<MasterData> = (data) =>
+    withDownload('complete-xlsx', () => downloadCompleteSet(data, 'xlsx'))();
+
+  const onDownloadCombinedPdf: SubmitHandler<MasterData> = (data) =>
+    withDownload('complete-pdf', () => downloadCompleteSet(data, 'pdf'))();
+
+  const onDownloadCombinedBoth: SubmitHandler<MasterData> = (data) =>
+    withDownload('complete-both', () => downloadCompleteSet(data, 'both'))();
 
   // ─── DEMO / TEST DATA ─────────────────────────────────────────────────────
   // All values below are generic placeholders for development and testing only.
@@ -186,33 +214,370 @@ export default function MasterInvoiceApp() {
   // Replace with your actual data at runtime — do NOT commit real data here.
 
   const fillTestData = () => {
-    control._reset(TEST_DATA);
+    control._reset({
+      exporterName: "YOUR COMPANY NAME",
+      exporterAddressLine1: "UNIT 1, BUSINESS PARK,",
+      exporterAddressLine2: "INDUSTRIAL AREA,",
+      exporterAddressLine3: "CITY-000000, STATE, INDIA.",
+      exporterPhone: "+91-0000000000",
+      exporterEmail: "exports@yourcompany.com",
+      exporterRef: "",
+
+      consigneeName: "TO THE ORDER OF BUYER",
+      consigneeAddress: "CITY, DESTINATION COUNTRY",
+      buyerName: "",
+      buyerOrderRef: "",
+      chaName: "YOUR CHA NAME",
+
+      iecNo: "XXXXXXXXXX",
+      gstStatus: "PAID",
+      companyGstNo: "00XXXXXXXXXXXXX",
+
+      drugLicNo1: "00X-XX-XXX-000000",
+      drugLicDate1: "01/01/2020",
+      drugLicNo2: "00X-XX-XXX-000001",
+      drugLicDate2: "01/01/2020",
+
+      lutRef: "XXXXXXXXXXXXXXX",
+      lutDate: "01/01/2020",
+
+      remittanceRef:       "TT-DEMO001",
+      remittanceDate:      "2025-01-01",
+      remittanceAmount:    "0",
+      remittanceAvailable: "0",
+      remittanceUsed:      "0",
+
+      proformaValue:        "0.00",
+      invoiceValue110:      "0.00",
+      invoiceValue110Round: "0.00",
+      adcRate:              "0.00",
+      exchangeRate:         0,
+      inrValue:             "0",
+      freightValue:         0,
+      insuranceValue:       0,
+      currency:             "USD",
+      uom:                  "KGS",
+      igstPercent:          0.05,
+
+      invoiceNo:        "INV-000001",
+      invoiceDate:      "2025-01-01",
+      packingListNo:    "INV-000001",
+      placeOfReceipt:   "Origin Airport",
+      portOfLoading:    "Origin Airport",
+      portOfDischarge:  "DESTINATION PORT",
+      finalDestination: "DESTINATION COUNTRY",
+      preCarriage:      "By AIR",
+      vesselFlight:     "",
+      flightDate:       "2025-01-01",
+      paymentTerms:     "100% ADVANCE WITH ORDER",
+      termsOfDelivery:  "By AIR CIF DESTINATION",
+
+      shippingBillNo: "", shippingBillDate: "",
+      awbNo: "", awbDate: "",
+      policyNo: "",
+      policyDate: "2025-01-01",
+
+      totalGrossWeight:     "0.000",
+      totalNetWeight:       "0.000",
+      totalCorrugatedBoxes: "00",
+      generalDescription:   "PHARMACEUTICAL PRODUCTS / OPHTHALMIC / MEDICAL DEVICES",
+      manufacturerName:     "MANUFACTURER A / MANUFACTURER B / MANUFACTURER C",
+      manufacturerAddress:  "CITY A (STATE) / CITY B (STATE) / CITY C (STATE)",
+
+      items: [
+        {
+          productName: "SAMPLE PRODUCT 01 5ML",
+          description: "ACTIVE INGREDIENT A OPHTHALMIC SOLUTION 0.3% W/V",
+          genericName: "ACTIVE INGREDIENT A",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30049099", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-001", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 01",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 02 3ML",
+          description: "ACTIVE INGREDIENT B EYE DROPS 0.04MG",
+          genericName: "ACTIVE INGREDIENT B",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30049099", packSize: "3ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-002", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 02",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 12, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 03 5ML",
+          description: "ACTIVE INGREDIENT C EYE DROPS 1% W/V",
+          genericName: "ACTIVE INGREDIENT C",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30049099", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-003", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 03",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 12, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 04 3ML",
+          description: "ACTIVE INGREDIENT D EYE DROPS 0.05% W/V",
+          genericName: "ACTIVE INGREDIENT D",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30043110", packSize: "3ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-004", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 04",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 05 10ML",
+          description: "ACTIVE INGREDIENT E EYE DROPS 0.5% W/V",
+          genericName: "ACTIVE INGREDIENT E",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30049099", packSize: "10ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-005", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 05",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 06 10ML",
+          description: "ACTIVE INGREDIENT F EYE DROPS 5MG",
+          genericName: "ACTIVE INGREDIENT F",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30049099", packSize: "10ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-006", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 06",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 07 5ML",
+          description: "FDC OF INGREDIENT G + INGREDIENT H EYE DROPS, SUSPENSION",
+          genericName: "INGREDIENT G + INGREDIENT H",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30042019", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-007", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 07",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 08 10ML",
+          description: "ACTIVE INGREDIENT I OPHTHALMIC SUSPENSION 10MG",
+          genericName: "ACTIVE INGREDIENT I",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30043200", packSize: "10ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-008", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 08",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 09 5ML",
+          description: "FDC OF INGREDIENT J + INGREDIENT K OPHTHALMIC SUSPENSION",
+          genericName: "INGREDIENT J + INGREDIENT K",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30042019", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-009", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 09",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 10 5ML",
+          description: "ACTIVE INGREDIENT L OPHTHALMIC SUSPENSION",
+          genericName: "ACTIVE INGREDIENT L",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30043200", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-010", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 10",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 12, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 11 5ML",
+          description: "ACTIVE INGREDIENT M EYE DROPS 1MG",
+          genericName: "ACTIVE INGREDIENT M",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30043200", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-011", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 11",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 12, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 12 1ML VIAL",
+          description: "ACTIVE INGREDIENT N STERILE SOLUTION 0.8MG",
+          genericName: "ACTIVE INGREDIENT N",
+          endUse: "Sample surgical indication",
+          hsnSac: "30051090", packSize: "1ML VIAL",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-012", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 12",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 12, uom: "KGS",
+        },
+        {
+          productName: "SAMPLE PRODUCT 13 5ML",
+          description: "ACTIVE INGREDIENT O OPHTHALMIC SOLUTION 0.01% W/V",
+          genericName: "ACTIVE INGREDIENT O",
+          endUse: "Sample therapeutic indication",
+          hsnSac: "30049099", packSize: "5ML",
+          quantity: 0, price: 0,
+          batchNo: "BATCH-013", mfgDate: "2025-01-01", expDate: "2027-01-01",
+          boxInfo: "BOX # 13",
+          grossWeight: 0, netWeight: 0,
+          supplierGstin: "00XXXXXXXXXXXXX", stateCode: "00", distCode: "DISTRICT",
+          gstPercent: 5, uom: "KGS",
+        },
+      ],
+
+      boxDimensions: [
+        { boxNo: "Box # 01", dimensions: "00 cms X 00 cms X 00 cms" },
+        { boxNo: "Box # 02", dimensions: "00 cms X 00 cms X 00 cms" },
+        { boxNo: "Box # 03", dimensions: "00 cms X 00 cms X 00 cms" },
+        { boxNo: "Box # 04", dimensions: "00 cms X 00 cms X 00 cms" },
+        { boxNo: "Box # 05", dimensions: "00 cms X 00 cms X 00 cms" },
+        { boxNo: "Box # 06", dimensions: "00 cms X 00 cms X 00 cms" },
+      ],
+    });
   };
 
   // ─── DOWNLOAD MENU ────────────────────────────────────────────────────────
+  // Spinner helper — shows while a specific download key is in progress
+  const Spin = ({ k }: { k: string }) =>
+    downloading === k ? <Loader2 size={12} className="ml-auto animate-spin" /> : null;
 
   const DownloadMenu = () => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 rounded-xl h-9 px-4 text-[13px] font-semibold">
-          <Download size={14} className="mr-2" />
+        <Button
+          disabled={!!downloading}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 rounded-xl h-9 px-4 text-[13px] font-semibold disabled:opacity-60"
+        >
+          {downloading
+            ? <Loader2 size={14} className="mr-2 animate-spin" />
+            : <Download size={14} className="mr-2" />}
           <span className="hidden sm:inline">Download</span>
           <ChevronDown size={12} className="ml-1.5" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-xl border-slate-100 p-1">
-        <DropdownMenuItem onClick={handleSubmit(onDownloadCombined)} className="rounded-lg cursor-pointer font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 mb-1 p-3">
-          <Layers size={14} className="mr-2" /> Complete Set (All Sheets)
+      <DropdownMenuContent align="end" className="w-64 rounded-xl shadow-xl border-slate-100 p-1.5">
+
+        {/* ── Complete Set ─────────────────────────────────────────────── */}
+        <DropdownMenuLabel className="text-[11px] text-slate-400 font-medium px-2 pt-1 pb-0.5 uppercase tracking-wide">
+          Complete Set
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadCombinedBoth)}
+          className="rounded-lg cursor-pointer font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-3 mb-0.5"
+        >
+          <Layers size={14} className="mr-2 shrink-0" />
+          All Sheets — XLSX + PDF
+          <Spin k="complete-both" />
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleSubmit(onDownloadMaster)} className="rounded-lg cursor-pointer p-3">
-          <FileText size={14} className="mr-2" /> Master Data Sheet Only
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadCombined)}
+          className="rounded-lg cursor-pointer p-2.5 mb-0.5 text-[13px]"
+        >
+          <FileSpreadsheet size={13} className="mr-2 shrink-0 text-emerald-600" />
+          All Sheets — XLSX only
+          <Spin k="complete-xlsx" />
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleSubmit(onDownloadCommercial)} className="rounded-lg cursor-pointer p-3">
-          <FileBadge size={14} className="mr-2" /> Commercial Invoice Only
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadCombinedPdf)}
+          className="rounded-lg cursor-pointer p-2.5 text-[13px]"
+        >
+          <FileDown size={13} className="mr-2 shrink-0 text-rose-500" />
+          All Sheets — PDF only
+          <Spin k="complete-pdf" />
         </DropdownMenuItem>
-        <DropdownMenuItem disabled className="rounded-lg p-3 opacity-40">
-          <Ship size={14} className="mr-2" /> Packing List (Soon)
+
+        <DropdownMenuSeparator className="my-1.5" />
+
+        {/* ── Commercial Invoice ───────────────────────────────────────── */}
+        <DropdownMenuLabel className="text-[11px] text-slate-400 font-medium px-2 pt-1 pb-0.5 uppercase tracking-wide">
+          Commercial Invoice
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadCommercial)}
+          className="rounded-lg cursor-pointer p-2.5 mb-0.5 text-[13px]"
+        >
+          <FileSpreadsheet size={13} className="mr-2 shrink-0 text-emerald-600" />
+          Invoice — XLSX
+          <Spin k="invoice-xlsx" />
         </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadCommercialPdf)}
+          className="rounded-lg cursor-pointer p-2.5 text-[13px]"
+        >
+          <FileDown size={13} className="mr-2 shrink-0 text-rose-500" />
+          Invoice — PDF
+          <Spin k="invoice-pdf" />
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator className="my-1.5" />
+
+        {/* ── Packing List ─────────────────────────────────────────────── */}
+        <DropdownMenuLabel className="text-[11px] text-slate-400 font-medium px-2 pt-1 pb-0.5 uppercase tracking-wide">
+          Packing List
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadPacking)}
+          className="rounded-lg cursor-pointer p-2.5 mb-0.5 text-[13px]"
+        >
+          <FileSpreadsheet size={13} className="mr-2 shrink-0 text-emerald-600" />
+          Packing List — XLSX
+          <Spin k="packing-xlsx" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadPackingPdf)}
+          className="rounded-lg cursor-pointer p-2.5 text-[13px]"
+        >
+          <FileDown size={13} className="mr-2 shrink-0 text-rose-500" />
+          Packing List — PDF
+          <Spin k="packing-pdf" />
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator className="my-1.5" />
+
+        {/* ── Master Sheet ─────────────────────────────────────────────── */}
+        <DropdownMenuLabel className="text-[11px] text-slate-400 font-medium px-2 pt-1 pb-0.5 uppercase tracking-wide">
+          Master Sheet
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          onClick={handleSubmit(onDownloadMaster)}
+          className="rounded-lg cursor-pointer p-2.5 text-[13px]"
+        >
+          <FileText size={13} className="mr-2 shrink-0 text-slate-500" />
+          Master Data — XLSX
+          <Spin k="master" />
+        </DropdownMenuItem>
+
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -709,19 +1074,43 @@ export default function MasterInvoiceApp() {
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-[13px] font-semibold hover:bg-emerald-700 transition-all shadow-md shadow-emerald-200">
-                  <Download size={14} /> Generate Invoice
+                <button
+                  disabled={!!downloading}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-[13px] font-semibold hover:bg-emerald-700 transition-all shadow-md shadow-emerald-200 disabled:opacity-60"
+                >
+                  {downloading
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Download size={14} />}
+                  Generate Invoice
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-xl border-slate-100 p-1">
-                <DropdownMenuItem onClick={handleSubmit(onDownloadCombined)} className="rounded-lg cursor-pointer font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 mb-1 p-3">
-                  <Layers size={14} className="mr-2" /> Complete Set (All Sheets)
+              <DropdownMenuContent align="end" className="w-64 rounded-xl shadow-xl border-slate-100 p-1.5">
+                <DropdownMenuLabel className="text-[11px] text-slate-400 font-medium px-2 pt-1 pb-0.5 uppercase tracking-wide">Complete Set</DropdownMenuLabel>
+                <DropdownMenuItem onClick={handleSubmit(onDownloadCombinedBoth)} className="rounded-lg cursor-pointer font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 p-3 mb-0.5">
+                  <Layers size={14} className="mr-2 shrink-0" /> All Sheets — XLSX + PDF
+                  {downloading === 'complete-both' && <Loader2 size={12} className="ml-auto animate-spin" />}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleSubmit(onDownloadMaster)} className="rounded-lg cursor-pointer p-3">
-                  <FileText size={14} className="mr-2" /> Master Data Sheet Only
+                <DropdownMenuItem onClick={handleSubmit(onDownloadCombined)} className="rounded-lg cursor-pointer p-2.5 mb-0.5 text-[13px]">
+                  <FileSpreadsheet size={13} className="mr-2 shrink-0 text-emerald-600" /> All Sheets — XLSX only
+                  {downloading === 'complete-xlsx' && <Loader2 size={12} className="ml-auto animate-spin" />}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleSubmit(onDownloadCommercial)} className="rounded-lg cursor-pointer p-3">
-                  <FileBadge size={14} className="mr-2" /> Commercial Invoice Only
+                <DropdownMenuItem onClick={handleSubmit(onDownloadCombinedPdf)} className="rounded-lg cursor-pointer p-2.5 text-[13px]">
+                  <FileDown size={13} className="mr-2 shrink-0 text-rose-500" /> All Sheets — PDF only
+                  {downloading === 'complete-pdf' && <Loader2 size={12} className="ml-auto animate-spin" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-1.5" />
+                <DropdownMenuLabel className="text-[11px] text-slate-400 font-medium px-2 pt-1 pb-0.5 uppercase tracking-wide">Individual</DropdownMenuLabel>
+                <DropdownMenuItem onClick={handleSubmit(onDownloadCommercial)} className="rounded-lg cursor-pointer p-2.5 text-[13px]">
+                  <FileSpreadsheet size={13} className="mr-2 shrink-0 text-emerald-600" /> Invoice — XLSX
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleSubmit(onDownloadCommercialPdf)} className="rounded-lg cursor-pointer p-2.5 text-[13px]">
+                  <FileDown size={13} className="mr-2 shrink-0 text-rose-500" /> Invoice — PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleSubmit(onDownloadPacking)} className="rounded-lg cursor-pointer p-2.5 text-[13px]">
+                  <FileSpreadsheet size={13} className="mr-2 shrink-0 text-emerald-600" /> Packing List — XLSX
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleSubmit(onDownloadPackingPdf)} className="rounded-lg cursor-pointer p-2.5 text-[13px]">
+                  <FileDown size={13} className="mr-2 shrink-0 text-rose-500" /> Packing List — PDF
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
